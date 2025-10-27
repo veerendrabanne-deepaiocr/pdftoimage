@@ -7,7 +7,7 @@ import converter
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads/'
 app.config['CONVERSION_FOLDER'] = 'conversions/'
-app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx', 'txt'}
+app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'docx', 'txt'}
 
 # Ensure the upload and conversion folders exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -51,8 +51,10 @@ def convert_file():
 
             return jsonify({"status": "success", "image_paths": image_paths})
 
+        except ValueError as e:
+            return jsonify({"status": "error", "message": str(e)}), 400
         except Exception as e:
-            return jsonify({"status": "error", "message": str(e)}), 500
+            return jsonify({"status": "error", "message": f"An unexpected error occurred: {e}"}), 500
 
     return jsonify({"status": "error", "message": "File type not allowed"}), 400
 

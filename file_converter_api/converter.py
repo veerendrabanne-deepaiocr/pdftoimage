@@ -1,28 +1,49 @@
 import os
-import subprocess
 import fitz  # PyMuPDF
+import docx
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
 
 def standardize_to_pdf(file_path, original_filename, upload_folder):
     """
-    Converts a variety of file types to a standardized PDF format.
+    Converts .docx and .txt files to a standardized PDF format using Python libraries.
     """
     file_ext = os.path.splitext(original_filename)[1].lower()
+    pdf_filename = os.path.splitext(original_filename)[0] + '.pdf'
+    pdf_filepath = os.path.join(upload_folder, pdf_filename)
 
     if file_ext == '.pdf':
         return file_path
 
-    if file_ext in ['.doc', '.docx', '.txt']:
-        # For this to work, LibreOffice must be installed on the server.
-        # The command converts the file to PDF and places it in the upload_folder.
-        subprocess.run([
-            'soffice', '--headless', '--convert-to', 'pdf',
-            file_path, '--outdir', upload_folder
-        ], check=True)
+    # Handle .docx files
+    if file_ext == '.docx':
+        doc = docx.Document(file_path)
+        pdf = SimpleDocTemplate(pdf_filepath)
+        styles = getSampleStyleSheet()
+        story = []
+        for para in doc.paragraphs:
+            story.append(Paragraph(para.text, styles['Normal']))
+            story.append(Spacer(1, 0.2 * inch))
+        pdf.build(story)
+        return pdf_filepath
 
-        pdf_filename = os.path.splitext(original_filename)[0] + '.pdf'
-        return os.path.join(upload_folder, pdf_filename)
+    # Handle .txt files
+    if file_ext == '.txt':
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text_content = f.read()
 
-    return None
+        pdf = SimpleDocTemplate(pdf_filepath)
+        styles = getSampleStyleSheet()
+        story = [Paragraph(line, styles['Normal']) for line in text_content.splitlines()]
+        pdf.build(story)
+        return pdf_filepath
+
+    # Explicitly reject .doc files
+    if file_ext == '.doc':
+        raise ValueError("Unsupported file type: .doc files are not supported in this version.")
+
+    return None # Return None for any other unsupported types
 
 def convert_pdf_to_images(pdf_path, original_filename, conversion_folder):
     """
