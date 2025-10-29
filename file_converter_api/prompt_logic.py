@@ -120,71 +120,97 @@ def build_dynamic_schema(country_data: dict, doc_type: str) -> dict:
         "country_code": country_data.get("country_code_iso", ""),
     }
 
-    # Add common document fields based on type
-    if doc_type_lower == "invoice":
-        schema.update({
-            "invoice_number": "string",
-            "invoice_date": "string(YYYY-MM-DD)",
-            "due_date": "string(YYYY-MM-DD)",
-        })
-    elif doc_type_lower == "purchase_order":
-        schema.update({
-            "po_number": "string",
-            "po_date": "string(YYYY-MM-DD)",
-            "delivery_date": "string(YYYY-MM-DD)",
-        })
-    elif doc_type_lower == "quotation":
-        schema.update({
-            "quote_number": "string",
-            "quote_date": "string(YYYY-MM-DD)",
-            "valid_until": "string(YYYY-MM-DD)",
-        })
+    # Handle financial documents
+    if doc_type_lower in ["invoice", "purchase_order", "quotation"]:
+        if doc_type_lower == "invoice":
+            schema.update({
+                "invoice_number": "string",
+                "invoice_date": "string(YYYY-MM-DD)",
+                "due_date": "string(YYYY-MM-DD)",
+            })
+        elif doc_type_lower == "purchase_order":
+            schema.update({
+                "po_number": "string",
+                "po_date": "string(YYYY-MM-DD)",
+                "delivery_date": "string(YYYY-MM-DD)",
+            })
+        elif doc_type_lower == "quotation":
+            schema.update({
+                "quote_number": "string",
+                "quote_date": "string(YYYY-MM-DD)",
+                "valid_until": "string(YYYY-MM-DD)",
+            })
 
-    # Add unique root-level fields
-    for field in country_data.get("unique_fields", []):
-        if field.get("scope") != "line_item":
-            schema[field["json_key"]] = field["type"]
+        for field in country_data.get("unique_fields", []):
+            if field.get("scope") != "line_item":
+                schema[field["json_key"]] = field["type"]
 
-    # Seller and Buyer details
-    schema["seller_details"] = {"name": "string", "address": "string"}
-    schema["buyer_details"] = {"name": "string", "address": "string"}
-
-    for identifier in country_data.get("identifiers", []):
-        if doc_type_lower in identifier.get("common_on", []):
-            if identifier["type"] in ["tax", "company"]:
+        schema["seller_details"] = {"name": "string", "address": "string"}
+        schema["buyer_details"] = {"name": "string", "address": "string"}
+        for identifier in country_data.get("identifiers", []):
+            if doc_type_lower in identifier.get("common_on", []) and identifier["type"] in ["tax", "company"]:
                 schema["seller_details"][identifier["json_key"]] = "string"
-                # Assume buyer might also have a tax/company ID
                 if doc_type_lower != "purchase_order":
                     schema["buyer_details"][identifier["json_key"]] = "string"
 
-    # Line Items
-    line_item_schema = {
-        "description": "string",
-        "quantity": "number",
-        "unit_price": "number",
-        "total_amount": "number",
-    }
-    for field in country_data.get("unique_fields", []):
-        if field.get("scope") == "line_item":
-            line_item_schema[field["json_key"]] = field["type"]
-    schema["line_items"] = [line_item_schema]
+        line_item_schema = {"description": "string", "quantity": "number", "unit_price": "number", "total_amount": "number"}
+        for field in country_data.get("unique_fields", []):
+            if field.get("scope") == "line_item":
+                line_item_schema[field["json_key"]] = field["type"]
+        schema["line_items"] = [line_item_schema]
 
-    # Financial Summary
-    financial_summary = {"subtotal": "number"}
-    for tax in country_data.get("tax_components", []):
-        financial_summary[tax["json_key"]] = "number"
+        financial_summary = {"subtotal": "number"}
+        for tax in country_data.get("tax_components", []):
+            financial_summary[tax["json_key"]] = "number"
+        total_amount_key = f"total_amount_{country_data.get('currency_code', '').lower()}"
+        financial_summary[total_amount_key] = "number"
+        schema["financial_summary"] = financial_summary
 
-    total_amount_key = f"total_amount_{country_data.get('currency_code', '').lower()}"
-    financial_summary[total_amount_key] = "number"
-    schema["financial_summary"] = financial_summary
+        payment_details = {}
+        for identifier in country_data.get("identifiers", []):
+            if doc_type_lower in identifier.get("common_on", []) and identifier["type"] == "banking":
+                payment_details[identifier["json_key"]] = "string"
+        if payment_details:
+            schema["payment_details"] = payment_details
 
-    # Payment Details
-    payment_details = {}
-    for identifier in country_data.get("identifiers", []):
-        if doc_type_lower in identifier.get("common_on", []) and identifier["type"] == "banking":
-            payment_details[identifier["json_key"]] = "string"
-    if payment_details:
-        schema["payment_details"] = payment_details
+    # Handle Travel and Expense documents
+    elif doc_type_lower == "travel_itinerary":
+        schema.update({
+            "booking_reference": "string",
+            "travel_date": "string(YYYY-MM-DD)",
+            "passenger_details": {"name": "string", "contact_info": "string"},
+            "itinerary": [
+                {
+                    "leg": "integer",
+                    "departure_location": "string",
+                    "arrival_location": "string",
+                    "departure_datetime": "string(YYYY-MM-DD HH:MM)",
+                    "arrival_datetime": "string(YYYY-MM-DD HH:MM)",
+                    "carrier": "string",
+                    "service_number": "string"
+                }
+            ]
+        })
+
+    elif doc_type_lower == "expense_report":
+        schema.update({
+            "report_id": "string",
+            "employee_name": "string",
+            "submission_date": "string(YYYY-MM-DD)",
+            "expenses": [
+                {
+                    "expense_date": "string(YYYY-MM-DD)",
+                    "category": "string",
+                    "description": "string",
+                    "amount": "number",
+                    "currency": "string"
+                }
+            ],
+            "total_reimbursement": {
+                "amount": "number",
+                "currency": "string"
+            }
+        })
 
     return schema
 
@@ -193,84 +219,84 @@ def generate_extraction_prompt(country_data: dict, doc_type: str, model_name: st
     Generates the final extraction prompt for a given document type and AI model
     using the new, highly structured format.
     """
-    # 1. Build the dynamic JSON schema
+    doc_type_lower = doc_type.lower().replace(" ", "_").replace("rfq_", "")
     schema_dict = build_dynamic_schema(country_data, doc_type)
     schema_json_br = json.dumps(schema_dict, indent=2).replace('\n', '<br>')
 
-    # 2. Gather data for prompt sections
     country_name = country_data.get("country_name", "")
-    currency = country_data.get("currency_code", "")
-    identifiers = country_data.get("identifiers", [])
-    tax_components = country_data.get("tax_components", [])
 
-    # 3. Generate model-specific prompts
-    if model_name == 'Gemini 2.5 Flash':
-        # Build Document Context
-        doc_context = f"The document originates from {country_name}. Expect {currency} currency, "
-        if tax_components:
-            doc_context += f"{tax_components[0]['name']} tax structures, "
+    # Common text blocks
+    gemini_system_role = "System Role: You are a high-precision, autonomous data extraction engine (doc_parser_v4.2). Your sole function is to parse the provided document and output only a valid, minified JSON object adhering strictly to the schema.\n\n"
+    gpt_system_prompt = "<system_prompt>\nYou are doc_parser_ai_v4.2, optimized for high-fidelity structured data extraction. Your output must be a single, minified JSON object conforming exactly to the <output_schema>. Do not include explanations, markdown, or any non-JSON text.\n</system_prompt>\n\n"
+    core_exec_rules = "Core Execution Rules:\n1. Output MUST be JSON only: Your entire response must be a single, minified JSON object. No preamble, no markdown formatting, no explanations.\n2. Strict Schema Adherence: Follow the JSON Schema precisely. All specified keys must be present.\n3. Handle Missing Data: If a field's value is not found in the document, return null for that key. DO NOT omit the key.\n4. Normalization: Dates must be YYYY-MM-DD. Monetary values must be number type (float/integer), remove currency symbols.\n\n"
+    gpt_core_exec_rules = "1. Strict Schema Adherence: Output JSON must match <output_schema>. All keys are mandatory.\n2. Null Handling: If data for a key is absent, its value must be null. Do not omit keys.\n3. Normalization: Dates=YYYY-MM-DD. Monetary=number (no symbols).\n"
 
-        id_list = [f"{i['name']} ({i['json_key']})" for i in identifiers]
-        doc_context += f"and specific identifiers: {', '.join(id_list)}."
+    if doc_type_lower in ["invoice", "purchase_order", "quotation"]:
+        # Existing logic for financial documents
+        currency = country_data.get("currency_code", "")
+        identifiers = country_data.get("identifiers", [])
+        tax_components = country_data.get("tax_components", [])
 
-        # Build Field-Specific Directives
-        field_directives = "\n".join([f"* {i['json_key']}: {i['validation_rule']}." for i in identifiers])
+        if model_name == 'Gemini 2.5 Flash':
+            doc_context = f"The document originates from {country_name}. Expect {currency} currency, "
+            if tax_components:
+                doc_context += f"{tax_components[0]['name']} tax structures, "
+            id_list = [f"{i['name']} ({i['json_key']})" for i in identifiers]
+            doc_context += f"and specific identifiers: {', '.join(id_list)}."
 
-        # Build tax logic directive
-        if len(tax_components) > 1:
-            tax_keys = [t['json_key'] for t in tax_components]
-            field_directives += f"\n* Differentiate {', '.join(tax_keys)}. If one tax type applies, others should be 0 or null."
+            field_directives = "\n".join([f"* {i['json_key']}: {i['validation_rule']}." for i in identifiers])
+            if len(tax_components) > 1:
+                tax_keys = [t['json_key'] for t in tax_components]
+                field_directives += f"\n* Differentiate {', '.join(tax_keys)}. If one tax type applies, others should be 0 or null."
 
-        # Assemble the final prompt
-        prompt = (
-            "System Role: You are a high-precision, autonomous data extraction engine (doc_parser_v4.2). "
-            "Your sole function is to parse the provided document and output only a valid, minified JSON object "
-            "adhering strictly to the schema.\n\n"
-            f"Task: Extract key financial and identification data from the {country_name} {doc_type} provided.\n\n"
-            f"Document Context: {doc_context}\n\n"
-            "Core Execution Rules:\n"
-            "1. Output MUST be JSON only: Your entire response must be a single, minified JSON object. No preamble, no markdown formatting, no explanations.\n"
-            "2. Strict Schema Adherence: Follow the JSON Schema precisely. All specified keys must be present.\n"
-            "3. Handle Missing Data: If a field's value is not found in the document, return null for that key. DO NOT omit the key.\n"
-            "4. Normalization: Dates must be YYYY-MM-DD. Monetary values must be number type (float/integer), remove currency symbols.\n\n"
-            f"Field-Specific Directives:\n{field_directives}\n\n"
-            f"JSON Schema:\njson<br>{schema_json_br}<br>"
-        )
-        return prompt
+            return (f"{gemini_system_role}"
+                    f"Task: Extract key financial and identification data from the {country_name} {doc_type} provided.\n\n"
+                    f"Document Context: {doc_context}\n\n"
+                    f"{core_exec_rules}"
+                    f"Field-Specific Directives:\n{field_directives}\n\n"
+                    f"JSON Schema:\njson<br>{schema_json_br}<br>")
 
-    elif model_name == 'GPT 4.1':
-        # Build Document Context
-        id_details = ", ".join([f"{i['name']} ({i['validation_rule']})" for i in identifiers])
-        tax_system_name = tax_components[0]['name'] if tax_components else "local"
-        doc_context = (
-            f"Source Document: {country_name} {doc_type}. Currency: {currency}. Tax System: {tax_system_name}. "
-            f"Key Identifiers: {id_details}."
-        )
+        elif model_name == 'GPT 4.1':
+            id_details = ", ".join([f"{i['name']} ({i['validation_rule']})" for i in identifiers])
+            tax_system_name = tax_components[0]['name'] if tax_components else "local"
+            doc_context = f"Source Document: {country_name} {doc_type}. Currency: {currency}. Tax System: {tax_system_name}. Key Identifiers: {id_details}."
 
-        # Build Extraction Rules
-        tax_logic_rule = ""
-        if len(tax_components) > 1:
-            tax_keys = [t['json_key'] for t in tax_components]
-            tax_logic_rule = f"4. Tax Logic: Correctly identify and populate {', '.join(tax_keys)}. Non-applicable tax types should be 0 or null."
+            tax_logic_rule = ""
+            if len(tax_components) > 1:
+                tax_keys = [t['json_key'] for t in tax_components]
+                tax_logic_rule = f"4. Tax Logic: Correctly identify and populate {', '.join(tax_keys)}. Non-applicable tax types should be 0 or null."
 
-        extraction_rules = (
-            "1. Strict Schema Adherence: Output JSON must match <output_schema>. All keys are mandatory.\n"
-            "2. Null Handling: If data for a key is absent, its value must be null. Do not omit keys.\n"
-            "3. Normalization: Dates=YYYY-MM-DD. Monetary=number (no symbols).\n"
-            f"{tax_logic_rule}"
-        )
+            return (f"{gpt_system_prompt}"
+                    f"<document_context>\n{doc_context}\n</document_context>\n\n"
+                    f"<extraction_rules>\n{gpt_core_exec_rules}{tax_logic_rule}\n</extraction_rules>\n\n"
+                    f"<output_schema>\njson<br>{schema_json_br}<br>\n</output_schema>")
 
-        # Assemble the final prompt
-        prompt = (
-            "<system_prompt>\n"
-            "You are doc_parser_ai_v4.2, optimized for high-fidelity structured data extraction. "
-            "Your output must be a single, minified JSON object conforming exactly to the <output_schema>. "
-            "Do not include explanations, markdown, or any non-JSON text.\n"
-            "</system_prompt>\n\n"
-            f"<document_context>\n{doc_context}\n</document_context>\n\n"
-            f"<extraction_rules>\n{extraction_rules}\n</extraction_rules>\n\n"
-            f"<output_schema>\njson<br>{schema_json_br}<br>\n</output_schema>"
-        )
-        return prompt
+    elif doc_type_lower == "travel_itinerary":
+        if model_name == 'Gemini 2.5 Flash':
+            return (f"{gemini_system_role}"
+                    f"Task: Extract key travel and booking data from the {doc_type} provided.\n\n"
+                    f"Document Context: This is a travel itinerary. It may contain flights, hotel bookings, or other travel segments.\n\n"
+                    f"{core_exec_rules.replace('Monetary values', 'Times and dates')}"
+                    f"JSON Schema:\njson<br>{schema_json_br}<br>")
+
+        elif model_name == 'GPT 4.1':
+            return (f"{gpt_system_prompt}"
+                    f"<document_context>\nSource Document: Travel Itinerary. May contain flights, hotels, etc.\n</document_context>\n\n"
+                    f"<extraction_rules>\n{gpt_core_exec_rules.replace('Monetary=', 'Dates=YYYY-MM-DD. Times=HH:MM. Monetary=')}\n</extraction_rules>\n\n"
+                    f"<output_schema>\njson<br>{schema_json_br}<br>\n</output_schema>")
+
+    elif doc_type_lower == "expense_report":
+        if model_name == 'Gemini 2.5 Flash':
+            return (f"{gemini_system_role}"
+                    f"Task: Extract key employee and expense data from the {doc_type} provided.\n\n"
+                    f"Document Context: This is an employee expense report for reimbursement. It contains a list of expenses with their costs and categories.\n\n"
+                    f"{core_exec_rules}"
+                    f"JSON Schema:\njson<br>{schema_json_br}<br>")
+
+        elif model_name == 'GPT 4.1':
+            return (f"{gpt_system_prompt}"
+                    f"<document_context>\nSource Document: Employee Expense Report.\n</document_context>\n\n"
+                    f"<extraction_rules>\n{gpt_core_exec_rules}\n</extraction_rules>\n\n"
+                    f"<output_schema>\njson<br>{schema_json_br}<br>\n</output_schema>")
 
     return ""
