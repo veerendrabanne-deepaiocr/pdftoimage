@@ -146,7 +146,7 @@ def fetch_country_data(country_name: str, api_key: str) -> dict | None:
     """
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
         meta_prompt = f"""
         System Role: You are a global financial document expert. Provide data in JSON format only.
