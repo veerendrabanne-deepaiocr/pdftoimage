@@ -2,3 +2,5 @@ Flask
 PyMuPDF
 python-docx
 reportlab
+google-generativeai
+python-dotenv

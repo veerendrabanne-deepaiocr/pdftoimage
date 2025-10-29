@@ -2,6 +2,11 @@ import os
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 import converter
+import prompt_logic
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configure application
 app = Flask(__name__)
@@ -57,6 +62,42 @@ def convert_file():
             return jsonify({"status": "error", "message": f"An unexpected error occurred: {e}"}), 500
 
     return jsonify({"status": "error", "message": "File type not allowed"}), 400
+
+@app.route('/api/v1/generate-prompt', methods=['GET'])
+def generate_prompt_api():
+    """
+    Generate a country-specific AI prompt based on query parameters.
+    """
+    # Get parameters from the request
+    country = request.args.get('country')
+    doc_type = request.args.get('doc_type')
+    model_name = request.args.get('model')
+
+    # Validate parameters
+    if not all([country, doc_type, model_name]):
+        return jsonify({"status": "error", "message": "Missing required parameters (country, doc_type, model)"}), 400
+
+    # Fetch the Gemini API key from environment variables
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return jsonify({"status": "error", "message": "GEMINI_API_KEY not configured on the server"}), 500
+
+    try:
+        # Fetch country-specific data
+        country_data = prompt_logic.fetch_country_data(country, api_key)
+        if not country_data:
+            return jsonify({"status": "error", "message": f"Could not retrieve data for country: {country}"}), 404
+
+        # Generate the prompt
+        prompt = prompt_logic.generate_extraction_prompt(country_data, doc_type, model_name)
+        if not prompt:
+            return jsonify({"status": "error", "message": "Could not generate a prompt for the specified model"}), 400
+
+        return jsonify({"status": "success", "prompt": prompt})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"An unexpected error occurred: {e}"}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)
